@@ -42,12 +42,27 @@ function App() {
     const [historyData, setHistoryData] = useState([]);
     const [error, setError] = useState(null);
 
+    // Detect if running on a remote host (not localhost) — skip backend fetch
+    const isRemote = typeof window !== 'undefined' &&
+        window.location.hostname !== 'localhost' &&
+        window.location.hostname !== '127.0.0.1';
+
     // Fetch list of patients on load (fallback to mock list)
     useEffect(() => {
+        if (isRemote) {
+            // On Vercel / remote: use mock data immediately
+            setUsingMockData(true);
+            setPatients(MOCK_PATIENTS);
+            setSelectedPatientId(MOCK_PATIENTS[0].id);
+            return;
+        }
         const fetchPatients = async () => {
             try {
                 const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-                const response = await fetch(`${apiUrl}/patients`);
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 3000);
+                const response = await fetch(`${apiUrl}/patients`, { signal: controller.signal });
+                clearTimeout(timeoutId);
                 if (response.ok) {
                     const data = await response.json();
                     setPatients(data);
