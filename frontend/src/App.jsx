@@ -3,9 +3,31 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { Activity, Thermometer, Droplet, HeartPulse, User } from 'lucide-react';
 import './App.css';
 
+// Mock patient list used when API is offline (e.g. Vercel-only deploy)
+const MOCK_PATIENTS = [
+    { id: 'p1', name: 'John Doe' },
+    { id: 'p2', name: 'Jane Smith' },
+    { id: 'p3', name: 'Alice Johnson' },
+    { id: 'p4', name: 'Bob Brown' }
+];
+
+function generateMockData(patientId) {
+    const patient = MOCK_PATIENTS.find(p => p.id === patientId) || MOCK_PATIENTS[0];
+    return {
+        patient_name: patient.name,
+        patient_id: patient.id,
+        heart_rate: Math.floor(Math.random() * 71) + 60,   // 60-130
+        temperature: +(Math.random() * 5.5 + 97).toFixed(1), // 97.0-102.5
+        spo2: Math.floor(Math.random() * 16) + 85,          // 85-100
+        bp_systolic: Math.floor(Math.random() * 41) + 110,  // 110-150
+        bp_diastolic: Math.floor(Math.random() * 26) + 70   // 70-95
+    };
+}
+
 function App() {
     const [patients, setPatients] = useState([]);
     const [selectedPatientId, setSelectedPatientId] = useState('');
+    const [usingMockData, setUsingMockData] = useState(false);
 
     const [healthData, setHealthData] = useState({
         patient_name: 'Loading...',
@@ -20,7 +42,7 @@ function App() {
     const [historyData, setHistoryData] = useState([]);
     const [error, setError] = useState(null);
 
-    // Fetch list of patients on load
+    // Fetch list of patients on load (fallback to mock list)
     useEffect(() => {
         const fetchPatients = async () => {
             try {
@@ -30,52 +52,62 @@ function App() {
                     const data = await response.json();
                     setPatients(data);
                     if (data.length > 0) setSelectedPatientId(data[0].id);
+                    return;
                 }
             } catch (err) {
-                console.error('Failed to load patients', err);
+                console.warn('API unavailable, using demo mode', err);
             }
+            // Fallback: use mock patients
+            setUsingMockData(true);
+            setPatients(MOCK_PATIENTS);
+            setSelectedPatientId(MOCK_PATIENTS[0].id);
         };
         fetchPatients();
     }, []);
 
-    // Poll health data
+    // Poll health data (fallback to mock generator)
     useEffect(() => {
         if (!selectedPatientId) return;
 
         const fetchHealthData = async () => {
-            try {
-                const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-                const response = await fetch(`${apiUrl}/health?patient_id=${selectedPatientId}`);
-                if (!response.ok) throw new Error('Network response was not ok');
-
-                const data = await response.json();
-                setHealthData(data);
-                setError(null);
-
-                // Update History (keep last 20 readings)
-                setHistoryData(prev => {
-                    const now = new Date();
-                    const timeString = `${now.getHours()}:${now.getMinutes()}:${now.getSeconds()}`;
-                    const newPoint = {
-                        time: timeString,
-                        hr: data.heart_rate,
-                        temp: data.temperature
-                    };
-                    const newHistory = [...prev, newPoint];
-                    if (newHistory.length > 20) return newHistory.slice(newHistory.length - 20);
-                    return newHistory;
-                });
-
-            } catch (err) {
-                console.error('Error fetching health data:', err);
-                setError('Could not fetch data. Retrying...');
+            let data;
+            if (!usingMockData) {
+                try {
+                    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+                    const response = await fetch(`${apiUrl}/health?patient_id=${selectedPatientId}`);
+                    if (!response.ok) throw new Error('Network response was not ok');
+                    data = await response.json();
+                    setError(null);
+                } catch (err) {
+                    console.warn('API fetch failed, switching to demo mode');
+                    setUsingMockData(true);
+                    data = generateMockData(selectedPatientId);
+                }
+            } else {
+                data = generateMockData(selectedPatientId);
             }
+
+            setHealthData(data);
+
+            // Update History (keep last 20 readings)
+            setHistoryData(prev => {
+                const now = new Date();
+                const timeString = `${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+                const newPoint = {
+                    time: timeString,
+                    hr: data.heart_rate,
+                    temp: data.temperature
+                };
+                const newHistory = [...prev, newPoint];
+                if (newHistory.length > 20) return newHistory.slice(newHistory.length - 20);
+                return newHistory;
+            });
         };
 
         fetchHealthData();
         const interval = setInterval(fetchHealthData, 3000);
         return () => clearInterval(interval);
-    }, [selectedPatientId]);
+    }, [selectedPatientId, usingMockData]);
 
     // Handle patient change
     const handlePatientSelect = (e) => {
@@ -130,7 +162,7 @@ function App() {
                         <p className="subtitle">Real-time vital signs and historical trend tracking</p>
                     </div>
                     <div className="status-indicator">
-                        {error ? <span className="error-text">🔴 Offline</span> : <span className="success-text">🟢 Live Updates</span>}
+                        {error ? <span className="error-text">🔴 Offline</span> : usingMockData ? <span className="success-text">🟡 Demo Mode</span> : <span className="success-text">🟢 Live Updates</span>}
                     </div>
                 </header>
 
